@@ -7,11 +7,17 @@
 **A high-performance, zero-intrusive, fully customizable assistive floating ball for Windows touch & tablet devices.**  
 **专为 Windows 触屏与二合一设备打造的高性能、零焦点打扰、全键位自定义桌面辅助悬浮球。**
 
+[![GitHub Release](https://img.shields.io/github/v/release/spurbro/TouchAssistBall?color=blue&logo=github)](https://github.com/spurbro/TouchAssistBall/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/spurbro/TouchAssistBall/total?color=orange&logo=github)](https://github.com/spurbro/TouchAssistBall/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
 [![Framework](https://img.shields.io/badge/.NET-4.0%2B-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Language](https://img.shields.io/badge/Language-C%23%20%2F%20WPF-239120?logo=csharp&logoColor=white)](https://learn.microsoft.com/dotnet/csharp/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/spurbro/TouchAssistBall/pulls)
+
+<br/>
+
+[📥 **Download Latest Release (最新正式版下载)**](https://github.com/spurbro/TouchAssistBall/releases/latest)
 
 [English](#-english) • [简体中文](#-简体中文)
 
@@ -23,6 +29,15 @@
 
 ### 💡 Overview
 **TouchAssistBall** is an ultra-lightweight, hardware-accelerated assistive touch ball specifically engineered for Windows touchscreen devices (Microsoft Surface, 2-in-1 laptops, rugged tablets). Built with pure C# and WPF Direct3D/DWM compositing, it provides an intuitive floating touch controller with zero focus stealing, instant typing input detection, radial gestures, and deep idle transparency.
+
+### 📥 Direct Downloads
+
+| Package | Description | Direct Link |
+| :--- | :--- | :--- |
+| 📦 **Full Portable Package** | Complete ZIP with assets, config and docs | [**TouchAssistBall-v1.0.0.zip**](https://github.com/spurbro/TouchAssistBall/releases/download/v1.0.0/TouchAssistBall-v1.0.0.zip) |
+| 🚀 **Standalone Executable** | Single standalone green `.exe` file (zero installer) | [**TouchAssistBall.exe**](https://github.com/spurbro/TouchAssistBall/releases/download/v1.0.0/TouchAssistBall.exe) |
+
+> Requires Windows 10/11 with .NET Framework 4.0 or higher (pre-installed by default on Windows).
 
 ### ✨ Key Features
 
@@ -42,8 +57,8 @@
 
 ### 🚀 Quick Start
 
-1. Download or compile `TouchAssistBall.exe`.
-2. Double-click `TouchAssistBall.exe` (or your desktop shortcut).
+1. Download [`TouchAssistBall-v1.0.0.zip`](https://github.com/spurbro/TouchAssistBall/releases/download/v1.0.0/TouchAssistBall-v1.0.0.zip) or [`TouchAssistBall.exe`](https://github.com/spurbro/TouchAssistBall/releases/download/v1.0.0/TouchAssistBall.exe).
+2. Double-click `TouchAssistBall.exe`.
 3. The assistive ball appears on your screen and the notification tray icon is activated.
 4. **Move the Ball**: Rapid double-tap, then hold and drag on the 2nd tap (or right-click the ball/tray and select "Drag Position").
 5. **Open Settings**: Right-click the floating ball, or double-click the system tray icon to configure custom keys, gesture thresholds, and idle timers.
@@ -67,6 +82,15 @@ build.bat
 
 ### 💡 项目简介
 **TouchAssistBall (触屏桌面悬浮球)** 是专为 Windows 触控屏设备（微软 Surface、二合一笔记本、工控触控平板）量身打造的高性能、低延迟、零焦点抢占的桌面手势增强助手。基于原生 C# 与 WPF Direct3D/DWM 硬件加速图层构建，完美融合现代 Windows 11 Fluent 视觉与极致顺滑的指尖操控。
+
+### 📥 快速下载
+
+| 发布类型 | 说明 | 极速直链下载 |
+| :--- | :--- | :--- |
+| 📦 **完整便携包 (推荐)** | 包含主程序、配置、高清图标与使用指南 | [**TouchAssistBall-v1.0.0.zip**](https://github.com/spurbro/TouchAssistBall/releases/download/v1.0.0/TouchAssistBall-v1.0.0.zip) |
+| 🚀 **单文件绿色版** | 独立绿色单文件执行程序，解压即用 | [**TouchAssistBall.exe**](https://github.com/spurbro/TouchAssistBall/releases/download/v1.0.0/TouchAssistBall.exe) |
+
+> 适用系统：Windows 10 / Windows 11（依赖 .NET Framework 4.0+，Windows 系统均已原生内置，开箱即用）。
 
 ### ✨ 核心特性
 
@@ -99,7 +123,7 @@ build.bat
 
 ### 🚀 运行与使用
 
-1. **直接运行**：双击运行生成的 `TouchAssistBall.exe`（单文件绿色程序，零依赖外部运行时）。
+1. **直接运行**：下载解压后双击 `TouchAssistBall.exe`（单文件绿色程序，零安装、零写入系统注册表）。
 2. **移动位置**：
    - 方式一：快速轻点第 1 下，紧接着第 2 下按住变微标 `✥` 即可拖动；
    - 方式二：右键点击悬浮球，选择【✥ 拖动悬浮球位置】或【📍 重置位置到屏幕右侧】。
