@@ -1,0 +1,22 @@
+# Build outputs
+*.exe
+*.dll
+*.pdb
+*.obj
+
+# Runtime logs and caches
+*.log
+*.log.bak
+*.tmp
+app_run.log*
+.agents/
+scratch/
+
+# Backup archives
+*.zip
+
+# OS / IDE files
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini
