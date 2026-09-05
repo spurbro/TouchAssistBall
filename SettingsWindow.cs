@@ -642,7 +642,7 @@ namespace TouchAssistBall
             sp.Children.Add(_sliderIdleTimeout);
 
             // Checkboxes
-            _chkShowHUD = new CheckBox { Content = "滑动时显示四向手势引导环 (Show Gesture Direction HUD)", IsChecked = true, Margin = new Thickness(0, 6, 0, 6) };
+            _chkShowHUD = new CheckBox { Content = "长按/滑动时扩展四扇区圆盘快捷轮盘 (Show 4-Sector Radial Menu)", IsChecked = true, Margin = new Thickness(0, 6, 0, 6) };
             _chkAutoStart = new CheckBox { Content = "开机随 Windows 自动启动 (Launch at Startup)", Margin = new Thickness(0, 6, 0, 6) };
 
             sp.Children.Add(_chkShowHUD);
@@ -699,13 +699,13 @@ namespace TouchAssistBall
                     "4. 智能单击（Tap）\n" +
                     "   • 文本框内：悬浮球显示 ⌫ 标识，轻触即退格（或自定义按键），长按连续快速退格，绝不抢夺光标焦点。\n" +
                     "   • 非文本框：单触默认静默无动作（杜绝误触）。\n\n" +
-                    "5. 真球心四向精准滑动（Radial Swipe Gestures）\n" +
-                    "   • 严格以悬浮球几何中心为基准解算上下左右方向，划出球体边缘即响应！\n" +
-                    "   • 👈 往左滑：复制（Ctrl + C）\n" +
-                    "   • 👉 往右滑：粘贴（Ctrl + V）\n" +
-                    "   • 👇 往下滑：系统截屏（Win + Shift + S）\n" +
-                    "   • 👆 往上滑：回车换行（Enter）\n" +
-                    "   • 中途拉回中心虚线圆环松手即可取消。"
+                    "5. 长按绽放四扇区圆盘快捷轮盘（Radial Pie Menu & Gestures）\n" +
+                    "   • 长按小球（或向外滑动）将流畅绽放为一个大圆盘，优雅划分为四个扇形区域：\n" +
+                    "   • 👆 上扇区：对应上滑快捷键（默认：回车 / 语音输入）\n" +
+                    "   • 👇 下扇区：对应下滑快捷键（默认：系统截屏）\n" +
+                    "   • 👈 左扇区：对应左滑快捷键（默认：复制 Ctrl+C）\n" +
+                    "   • 👉 右扇区：对应右滑快捷键（默认：粘贴 Ctrl+V）\n" +
+                    "   • 手指划入扇区发光高亮，抬手即刻触发对应操作；若不想触发，中途拉回中心虚线圆环松手即可安全取消。"
             };
 
             sp.Children.Add(tb);

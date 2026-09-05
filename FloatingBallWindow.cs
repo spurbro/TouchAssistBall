@@ -63,6 +63,7 @@ namespace TouchAssistBall
 
         // Inactivity Deep Fade & Visibility Control
         private readonly DispatcherTimer _idleFadeTimer;
+        private readonly DispatcherTimer _screenshotDetectTimer;
         private DateTime _lastInteractionTime = DateTime.UtcNow;
         private bool _isUserHidden = false;
 
@@ -79,23 +80,54 @@ namespace TouchAssistBall
         private Ellipse _ballInnerRing;
         private TextBlock _ballIcon;
 
-        private Border _badgeUp;
-        private Border _badgeDown;
-        private Border _badgeLeft;
-        private Border _badgeRight;
-        private TextBlock _txtUp;
-        private TextBlock _txtDown;
-        private TextBlock _txtLeft;
-        private TextBlock _txtRight;
+        // 4-Sector Annular Radial Menu Components
+        private class RadialSectorItem
+        {
+            public SlideDirection Direction;
+            public Path SectorPath;
+            public Border LabelPill;
+            public TextBlock TxtAction;
+            public TextBlock TxtKey;
+            public double CenterAngle; // 270 (Up), 90 (Down), 180 (Left), 0 (Right)
+            public double StartAngle;
+            public double EndAngle;
+        }
+
+        private Canvas _radialMenuCanvas;
+        private ScaleTransform _radialMenuScale;
+        private bool _isRadialMenuOpen = false;
+        private readonly System.Collections.Generic.List<RadialSectorItem> _radialSectors = new System.Collections.Generic.List<RadialSectorItem>();
+        private Ellipse _radialOuterGlowRing;
+
+        // Cached Freezable brushes and effects for 120 FPS zero-allocation performance
+        private LinearGradientBrush _sectorBrushNormal;
+        private LinearGradientBrush _sectorBrushActive;
+        private SolidColorBrush _sectorStrokeNormal;
+        private SolidColorBrush _sectorStrokeActive;
+        private DropShadowEffect _sectorShadowNormal;
+        private DropShadowEffect _sectorGlowActive;
+        private SolidColorBrush _brushCancelRed;
+        private SolidColorBrush _brushActiveBorder;
+
+        // Label pill pre-allocated brushes
+        private SolidColorBrush _pillBgNormal;
+        private SolidColorBrush _pillBorderNormal;
+        private SolidColorBrush _pillBgActive;
+        private SolidColorBrush _pillBorderActive;
+        private SolidColorBrush _pillTextActionNormal;
+        private SolidColorBrush _pillTextKeyNormal;
+        private SolidColorBrush _pillTextKeyActive;
+        private SlideDirection _lastHighlightedDir = (SlideDirection)(-1);
+        private bool _radialLabelsDirty = false;
 
         private Ellipse _centerCancelZone;
 
-        // Swipe Distance Tuning
-        private const double HUD_EXT = 95.0;
+        // Swipe Distance & Radial Menu Tuning
+        private const double HUD_EXT = 115.0;
 
         private double CancelRadiusPx
         {
-            get { return Math.Max(20.0, _config.BallSize * 0.4); }
+            get { return Math.Max(22.0, _config.BallSize * 0.45); }
         }
 
         // Honor user-configured swipe threshold (config.json "SwipeThreshold")
@@ -208,6 +240,11 @@ namespace TouchAssistBall
             _idleFadeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _idleFadeTimer.Tick += OnIdleFadeTimerTick;
             _idleFadeTimer.Start();
+
+            // 7. Global Physical Screenshot Key Detector (PrintScreen & Win+Shift+S)
+            _screenshotDetectTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(45) };
+            _screenshotDetectTimer.Tick += OnScreenshotDetectTimerTick;
+            _screenshotDetectTimer.Start();
 
             // Touch & Mouse Event Handlers on _ballGrid
             _ballGrid.PreviewTouchDown += OnBallTouchDown;
@@ -324,9 +361,80 @@ namespace TouchAssistBall
             catch { }
         }
 
+        private void InitRadialBrushes()
+        {
+            if (_sectorBrushNormal != null) return;
+
+            _sectorBrushNormal = new LinearGradientBrush(
+                Color.FromArgb(230, 24, 32, 47),
+                Color.FromArgb(240, 15, 23, 42), 45);
+            _sectorBrushNormal.Freeze();
+
+            _sectorBrushActive = new LinearGradientBrush(
+                Color.FromArgb(250, 37, 99, 235),
+                Color.FromArgb(250, 14, 165, 233), 45);
+            _sectorBrushActive.Freeze();
+
+            _sectorStrokeNormal = new SolidColorBrush(Color.FromArgb(140, 148, 163, 184));
+            _sectorStrokeNormal.Freeze();
+
+            _sectorStrokeActive = new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
+            _sectorStrokeActive.Freeze();
+
+            _sectorShadowNormal = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 8,
+                ShadowDepth = 2,
+                Opacity = 0.40
+            };
+            _sectorShadowNormal.Freeze();
+
+            _sectorGlowActive = new DropShadowEffect
+            {
+                Color = Color.FromRgb(56, 189, 248),
+                BlurRadius = 12,
+                ShadowDepth = 0,
+                Opacity = 0.85
+            };
+            _sectorGlowActive.Freeze();
+
+            _brushCancelRed = new SolidColorBrush(Color.FromArgb(240, 244, 63, 94));
+            _brushCancelRed.Freeze();
+
+            _brushActiveBorder = new SolidColorBrush(Color.FromArgb(255, 224, 242, 254));
+            _brushActiveBorder.Freeze();
+
+            // Pre-allocated frozen brushes for label pills to guarantee 0 GC allocation during interaction
+            _pillBgNormal = new SolidColorBrush(Color.FromArgb(140, 15, 23, 42));
+            _pillBgNormal.Freeze();
+
+            _pillBorderNormal = new SolidColorBrush(Color.FromArgb(90, 148, 163, 184));
+            _pillBorderNormal.Freeze();
+
+            _pillBgActive = new SolidColorBrush(Color.FromArgb(220, 30, 58, 138));
+            _pillBgActive.Freeze();
+
+            _pillBorderActive = new SolidColorBrush(Color.FromArgb(255, 147, 197, 253));
+            _pillBorderActive.Freeze();
+
+            _pillTextActionNormal = new SolidColorBrush(Color.FromRgb(241, 245, 249));
+            _pillTextActionNormal.Freeze();
+
+            _pillTextKeyNormal = new SolidColorBrush(Color.FromRgb(148, 163, 184));
+            _pillTextKeyNormal.Freeze();
+
+            _pillTextKeyActive = new SolidColorBrush(Color.FromRgb(224, 242, 254));
+            _pillTextKeyActive.Freeze();
+        }
+
         private void BuildUI()
         {
+            InitRadialBrushes();
+
             double ballSize = _config.BallSize;
+            double cx = HUD_EXT + ballSize / 2;
+            double cy = HUD_EXT + ballSize / 2;
 
             _rootCanvas = new Canvas
             {
@@ -336,6 +444,37 @@ namespace TouchAssistBall
                 ClipToBounds = false
             };
 
+            // 1. Radial Menu Container
+            _radialMenuScale = new ScaleTransform(0.35, 0.35, cx, cy);
+            _radialMenuCanvas = new Canvas
+            {
+                Width = Width,
+                Height = Height,
+                RenderTransform = _radialMenuScale,
+                Opacity = 0.0,
+                Visibility = Visibility.Hidden,
+                IsHitTestVisible = false
+            };
+
+            double rOuter = ballSize / 2 + 76.0;
+            _radialOuterGlowRing = new Ellipse
+            {
+                Width = (rOuter + 6) * 2,
+                Height = (rOuter + 6) * 2,
+                Stroke = new SolidColorBrush(Color.FromArgb(35, 255, 255, 255)),
+                StrokeThickness = 1.0,
+                StrokeDashArray = new DoubleCollection { 4, 6 },
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(_radialOuterGlowRing, cx - (rOuter + 6));
+            Canvas.SetTop(_radialOuterGlowRing, cy - (rOuter + 6));
+            _radialMenuCanvas.Children.Add(_radialOuterGlowRing);
+
+            BuildRadialSectors();
+            UpdateRadialMenuLabels();
+            _radialLabelsDirty = false;
+
+            // 2. Central Floating Ball
             _ballScale = new ScaleTransform(1.0, 1.0, ballSize / 2, ballSize / 2);
             _ballGrid = new Grid
             {
@@ -355,9 +494,9 @@ namespace TouchAssistBall
                 Effect = new DropShadowEffect
                 {
                     Color = Colors.Black,
-                    BlurRadius = 14,
-                    ShadowDepth = 3,
-                    Opacity = 0.55
+                    BlurRadius = 10,
+                    ShadowDepth = 2,
+                    Opacity = 0.45
                 }
             };
 
@@ -392,99 +531,257 @@ namespace TouchAssistBall
             _ballGrid.Children.Add(_ballInnerRing);
             _ballGrid.Children.Add(_ballIcon);
 
+            // 3. Center Cancel Indicator Zone
             double cancelRadius = CancelRadiusPx;
             _centerCancelZone = new Ellipse
             {
                 Width = cancelRadius * 2,
                 Height = cancelRadius * 2,
-                Stroke = new SolidColorBrush(Color.FromArgb(140, 148, 163, 184)),
-                StrokeThickness = 1.8,
+                Stroke = _brushCancelRed,
+                StrokeThickness = 2.0,
                 StrokeDashArray = new DoubleCollection { 3, 3 },
                 Opacity = 0,
                 IsHitTestVisible = false
             };
-            Canvas.SetLeft(_centerCancelZone, HUD_EXT + ballSize / 2 - cancelRadius);
-            Canvas.SetTop(_centerCancelZone, HUD_EXT + ballSize / 2 - cancelRadius);
+            Canvas.SetLeft(_centerCancelZone, cx - cancelRadius);
+            Canvas.SetTop(_centerCancelZone, cy - cancelRadius);
 
-            _badgeUp = CreateDirectionBadge(out _txtUp);
-            _badgeDown = CreateDirectionBadge(out _txtDown);
-            _badgeLeft = CreateDirectionBadge(out _txtLeft);
-            _badgeRight = CreateDirectionBadge(out _txtRight);
-
-            PositionDirectionBadges();
-
+            // Assemble into root canvas (Radial menu behind, then cancel zone, then ball on top)
+            _rootCanvas.Children.Add(_radialMenuCanvas);
             _rootCanvas.Children.Add(_centerCancelZone);
-            _rootCanvas.Children.Add(_badgeUp);
-            _rootCanvas.Children.Add(_badgeDown);
-            _rootCanvas.Children.Add(_badgeLeft);
-            _rootCanvas.Children.Add(_badgeRight);
             _rootCanvas.Children.Add(_ballGrid);
 
             Content = _rootCanvas;
             UpdateBallVisuals();
         }
 
-        private Border CreateDirectionBadge(out TextBlock tb)
+        private void BuildRadialSectors()
         {
-            tb = new TextBlock
-            {
-                Foreground = Brushes.White,
-                FontSize = 13.0,
-                FontWeight = FontWeights.Bold,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
+            _radialSectors.Clear();
 
-            Border b = new Border
-            {
-                CornerRadius = new CornerRadius(16),
-                Padding = new Thickness(14, 7, 14, 7),
-                Background = new SolidColorBrush(Color.FromArgb(235, 15, 23, 42)),
-                BorderBrush = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184)),
-                BorderThickness = new Thickness(1.8),
-                Opacity = 0,
-                IsHitTestVisible = false,
-                Effect = new DropShadowEffect
-                {
-                    Color = Colors.Black,
-                    BlurRadius = 10,
-                    ShadowDepth = 2,
-                    Opacity = 0.5
-                },
-                Child = tb
-            };
+            // Up: Center 270°, Start 226.5°, End 313.5°
+            _radialSectors.Add(CreateRadialSectorItem(SlideDirection.Up, 270.0, 226.5, 313.5));
+            // Right: Center 0° (360°), Start 316.5°, End 403.5° (43.5°)
+            _radialSectors.Add(CreateRadialSectorItem(SlideDirection.Right, 0.0, 316.5, 403.5));
+            // Down: Center 90°, Start 46.5°, End 133.5°
+            _radialSectors.Add(CreateRadialSectorItem(SlideDirection.Down, 90.0, 46.5, 133.5));
+            // Left: Center 180°, Start 136.5°, End 223.5°
+            _radialSectors.Add(CreateRadialSectorItem(SlideDirection.Left, 180.0, 136.5, 223.5));
 
-            return b;
+            foreach (var item in _radialSectors)
+            {
+                _radialMenuCanvas.Children.Add(item.SectorPath);
+                _radialMenuCanvas.Children.Add(item.LabelPill);
+            }
         }
 
-        private void PositionDirectionBadges()
+        private RadialSectorItem CreateRadialSectorItem(SlideDirection dir, double centerAngle, double startAngle, double endAngle)
         {
             double ballSize = _config.BallSize;
             double cx = HUD_EXT + ballSize / 2;
             double cy = HUD_EXT + ballSize / 2;
-            double r = ballSize / 2 + 48;
+            double rInner = ballSize / 2 + 8.0;
+            double rOuter = ballSize / 2 + 76.0;
 
-            _txtUp.Text = ActionExecutor.GetActionShortLabel(_config.SwipeUpAction, _config.CustomSwipeUpKey);
-            _txtDown.Text = ActionExecutor.GetActionShortLabel(_config.SwipeDownAction, _config.CustomSwipeDownKey);
-            _txtLeft.Text = ActionExecutor.GetActionShortLabel(_config.SwipeLeftAction, _config.CustomSwipeLeftKey);
-            _txtRight.Text = ActionExecutor.GetActionShortLabel(_config.SwipeRightAction, _config.CustomSwipeRightKey);
+            PathGeometry geom = CreateAnnularSectorGeometry(cx, cy, rInner, rOuter, startAngle, endAngle);
 
-            _badgeUp.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            _badgeDown.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            _badgeLeft.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            _badgeRight.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Path path = new Path
+            {
+                Data = geom,
+                Fill = _sectorBrushNormal,
+                Stroke = _sectorStrokeNormal,
+                StrokeThickness = 1.6,
+                Effect = _sectorShadowNormal,
+                IsHitTestVisible = false
+            };
 
-            Canvas.SetLeft(_badgeUp, cx - _badgeUp.DesiredSize.Width / 2);
-            Canvas.SetTop(_badgeUp, cy - r - _badgeUp.DesiredSize.Height / 2);
+            TextBlock txtAction = new TextBlock
+            {
+                Foreground = Brushes.White,
+                FontSize = 13.5,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center
+            };
 
-            Canvas.SetLeft(_badgeDown, cx - _badgeDown.DesiredSize.Width / 2);
-            Canvas.SetTop(_badgeDown, cy + r - _badgeDown.DesiredSize.Height / 2);
+            TextBlock txtKey = new TextBlock
+            {
+                Foreground = _pillTextKeyNormal,
+                FontSize = 10.5,
+                FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 1, 0, 0)
+            };
 
-            Canvas.SetLeft(_badgeLeft, cx - r - _badgeLeft.DesiredSize.Width / 2);
-            Canvas.SetTop(_badgeLeft, cy - _badgeLeft.DesiredSize.Height / 2);
+            StackPanel sp = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            sp.Children.Add(txtAction);
+            sp.Children.Add(txtKey);
 
-            Canvas.SetLeft(_badgeRight, cx + r - _badgeRight.DesiredSize.Width / 2);
-            Canvas.SetTop(_badgeRight, cy - _badgeRight.DesiredSize.Height / 2);
+            Border pill = new Border
+            {
+                Background = _pillBgNormal,
+                BorderBrush = _pillBorderNormal,
+                BorderThickness = new Thickness(1.0),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(8, 4, 8, 4),
+                Child = sp,
+                IsHitTestVisible = false
+            };
+
+            return new RadialSectorItem
+            {
+                Direction = dir,
+                SectorPath = path,
+                LabelPill = pill,
+                TxtAction = txtAction,
+                TxtKey = txtKey,
+                CenterAngle = centerAngle,
+                StartAngle = startAngle,
+                EndAngle = endAngle
+            };
+        }
+
+        private PathGeometry CreateAnnularSectorGeometry(double cx, double cy, double rInner, double rOuter, double startDeg, double endDeg)
+        {
+            double startRad = startDeg * Math.PI / 180.0;
+            double endRad = endDeg * Math.PI / 180.0;
+
+            Point pInnerStart = new Point(cx + rInner * Math.Cos(startRad), cy + rInner * Math.Sin(startRad));
+            Point pOuterStart = new Point(cx + rOuter * Math.Cos(startRad), cy + rOuter * Math.Sin(startRad));
+            Point pOuterEnd = new Point(cx + rOuter * Math.Cos(endRad), cy + rOuter * Math.Sin(endRad));
+            Point pInnerEnd = new Point(cx + rInner * Math.Cos(endRad), cy + rInner * Math.Sin(endRad));
+
+            PathFigure figure = new PathFigure
+            {
+                StartPoint = pInnerStart,
+                IsClosed = true,
+                IsFilled = true
+            };
+
+            figure.Segments.Add(new LineSegment(pOuterStart, true));
+            figure.Segments.Add(new ArcSegment(
+                pOuterEnd,
+                new Size(rOuter, rOuter),
+                0,
+                false,
+                SweepDirection.Clockwise,
+                true
+            ));
+            figure.Segments.Add(new LineSegment(pInnerEnd, true));
+            figure.Segments.Add(new ArcSegment(
+                pInnerStart,
+                new Size(rInner, rInner),
+                0,
+                false,
+                SweepDirection.Counterclockwise,
+                true
+            ));
+
+            PathGeometry geom = new PathGeometry();
+            geom.Figures.Add(figure);
+            geom.Freeze();
+            return geom;
+        }
+
+        private void UpdateRadialMenuLabels()
+        {
+            double ballSize = _config.BallSize;
+            double cx = HUD_EXT + ballSize / 2;
+            double cy = HUD_EXT + ballSize / 2;
+            double rInner = ballSize / 2 + 8.0;
+            double rOuter = ballSize / 2 + 76.0;
+            double rMid = (rInner + rOuter) / 2.0;
+
+            foreach (var item in _radialSectors)
+            {
+                ActionType action = ActionType.None;
+                string customKey = "";
+
+                switch (item.Direction)
+                {
+                    case SlideDirection.Up:
+                        action = _config.SwipeUpAction;
+                        customKey = _config.CustomSwipeUpKey;
+                        break;
+                    case SlideDirection.Down:
+                        action = _config.SwipeDownAction;
+                        customKey = _config.CustomSwipeDownKey;
+                        break;
+                    case SlideDirection.Left:
+                        action = _config.SwipeLeftAction;
+                        customKey = _config.CustomSwipeLeftKey;
+                        break;
+                    case SlideDirection.Right:
+                        action = _config.SwipeRightAction;
+                        customKey = _config.CustomSwipeRightKey;
+                        break;
+                }
+
+                item.TxtAction.Text = ActionExecutor.GetActionShortLabel(action, customKey);
+                string hint = ActionExecutor.GetActionKeyHint(action, customKey);
+                if (string.IsNullOrEmpty(hint) || hint == item.TxtAction.Text)
+                {
+                    item.TxtKey.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    item.TxtKey.Text = hint;
+                    item.TxtKey.Visibility = Visibility.Visible;
+                }
+
+                double angleRad = item.CenterAngle * Math.PI / 180.0;
+                double targetX = cx + rMid * Math.Cos(angleRad);
+                double targetY = cy + rMid * Math.Sin(angleRad);
+
+                item.LabelPill.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                double pillW = item.LabelPill.DesiredSize.Width;
+                double pillH = item.LabelPill.DesiredSize.Height;
+
+                Canvas.SetLeft(item.LabelPill, targetX - pillW / 2);
+                Canvas.SetTop(item.LabelPill, targetY - pillH / 2);
+            }
+        }
+
+        private void RebuildRadialMenu()
+        {
+            if (_radialMenuCanvas == null) return;
+            _radialMenuCanvas.Children.Clear();
+
+            double ballSize = _config.BallSize;
+            double cx = HUD_EXT + ballSize / 2;
+            double cy = HUD_EXT + ballSize / 2;
+            double rOuter = ballSize / 2 + 76.0;
+
+            _radialMenuScale.CenterX = cx;
+            _radialMenuScale.CenterY = cy;
+
+            _radialOuterGlowRing.Width = (rOuter + 6) * 2;
+            _radialOuterGlowRing.Height = (rOuter + 6) * 2;
+            Canvas.SetLeft(_radialOuterGlowRing, cx - (rOuter + 6));
+            Canvas.SetTop(_radialOuterGlowRing, cy - (rOuter + 6));
+            _radialMenuCanvas.Children.Add(_radialOuterGlowRing);
+
+            BuildRadialSectors();
+            UpdateRadialMenuLabels();
+            _radialLabelsDirty = false;
+        }
+
+        private string GetDirectionIcon(SlideDirection dir)
+        {
+            switch (dir)
+            {
+                case SlideDirection.Up: return "↑";
+                case SlideDirection.Down: return "↓";
+                case SlideDirection.Left: return "←";
+                case SlideDirection.Right: return "→";
+                default: return "●";
+            }
         }
 
         private void UpdateBallVisuals()
@@ -502,7 +799,6 @@ namespace TouchAssistBall
 
             if (_isPhysicalHolding)
             {
-                // Purple/Indigo with hold label during active physical key hold
                 _ballEllipse.Fill = new LinearGradientBrush(
                     Color.FromArgb(255, 147, 51, 234),
                     Color.FromArgb(255, 109, 40, 217), 65);
@@ -514,13 +810,37 @@ namespace TouchAssistBall
 
             if (_mode == GestureMode.Moving)
             {
-                // Amber/Orange with ✥ in Move mode (Double-tap & held)
                 _ballEllipse.Fill = new LinearGradientBrush(
                     Color.FromArgb(255, 245, 158, 11),
                     Color.FromArgb(255, 217, 119, 6), 65);
                 _ballBorder.Stroke = new SolidColorBrush(Color.FromArgb(255, 254, 243, 199));
                 _ballIcon.Text = "✥";
                 _ballIcon.FontSize = _config.BallSize * 0.42;
+                return;
+            }
+
+            if (_mode == GestureMode.Sliding)
+            {
+                if (_currentDirection == SlideDirection.None)
+                {
+                    // Finger inside center deadzone: Cancel state
+                    _ballEllipse.Fill = new LinearGradientBrush(
+                        Color.FromArgb(255, 225, 29, 72),
+                        Color.FromArgb(255, 190, 18, 60), 65);
+                    _ballBorder.Stroke = _brushCancelRed;
+                    _ballIcon.Text = "✕";
+                    _ballIcon.FontSize = _config.BallSize * 0.36;
+                }
+                else
+                {
+                    // Active sector hover state
+                    _ballEllipse.Fill = new LinearGradientBrush(
+                        Color.FromArgb(255, 37, 99, 235),
+                        Color.FromArgb(255, 14, 165, 233), 65);
+                    _ballBorder.Stroke = _brushActiveBorder;
+                    _ballIcon.Text = GetDirectionIcon(_currentDirection);
+                    _ballIcon.FontSize = _config.BallSize * 0.38;
+                }
                 return;
             }
 
@@ -535,7 +855,7 @@ namespace TouchAssistBall
                 return;
             }
 
-            if (_mode == GestureMode.Touching || _mode == GestureMode.Sliding)
+            if (_mode == GestureMode.Touching)
             {
                 _ballEllipse.Fill = new LinearGradientBrush(
                     Color.FromArgb(255, 79, 70, 229),
@@ -591,29 +911,14 @@ namespace TouchAssistBall
             if (_mode == GestureMode.Touching && !_isSecondTapCandidate)
             {
                 _isLongPressTriggered = true;
-                _isPhysicalHolding = true;
+                _mode = GestureMode.Sliding;
+                _currentDirection = SlideDirection.None;
 
-                bool inInput = InputDetector.IsInInputField(true);
-                if (inInput)
-                {
-                    _activeHoldLabel = "退格";
-                    AppLogger.Log("LongPress threshold reached in InputField -> StartHold Backspace");
-                    ActionExecutor.StartHold(ActionType.Backspace);
-                    UpdateBallVisuals();
-                }
-                else
-                {
-                    ActionType action = (_config.LongPressAction == ActionType.HoldCurrentKey) ? _config.ClickAction : _config.LongPressAction;
-                    string customKey = (_config.LongPressAction == ActionType.HoldCurrentKey) ? _config.CustomClickKey : _config.CustomLongPressKey;
-
-                    if (action != ActionType.None)
-                    {
-                        _activeHoldLabel = ActionExecutor.GetActionShortLabel(action, customKey);
-                        AppLogger.Log("LongPress threshold reached -> StartHold action=" + action + " label=" + _activeHoldLabel);
-                        ActionExecutor.StartHold(action, customKey);
-                        UpdateBallVisuals();
-                    }
-                }
+                AppLogger.Log("LongPress reached threshold -> Expand Radial 4-Sector Menu");
+                ShowRadialMenu(true);
+                HighlightRadialSector(SlideDirection.None);
+                _centerCancelZone.Opacity = 1.0;
+                UpdateBallVisuals();
             }
         }
 
@@ -789,31 +1094,37 @@ namespace TouchAssistBall
                 _longPressTimer.Stop();
                 _doubleTapHoldTimer.Stop();
                 _singleTapTimer.Stop();
-                if (_isPhysicalHolding)
-                {
-                    ActionExecutor.ReleaseHold();
-                    _isPhysicalHolding = false;
-                    _isLongPressTriggered = false;
-                }
                 _isSecondTapCandidate = false;
                 _mode = GestureMode.Sliding;
                 AppLogger.Log(string.Format("Swipe START: dist={0:F1}px threshold={1:F1}", dist, SwipeThresholdPx));
-                ShowHUD(true);
+                ShowRadialMenu(true);
             }
 
             if (_mode == GestureMode.Sliding)
             {
                 if (dist < CancelRadiusPx)
                 {
-                    _currentDirection = SlideDirection.None;
-                    HighlightHUD(SlideDirection.None);
-                    _centerCancelZone.Opacity = 1.0;
+                    if (_currentDirection != SlideDirection.None)
+                    {
+                        _currentDirection = SlideDirection.None;
+                        HighlightRadialSector(SlideDirection.None);
+                        _centerCancelZone.Opacity = 1.0;
+                        UpdateBallVisuals();
+                    }
                 }
                 else
                 {
-                    _currentDirection = ResolveDirection(dx, dy);
-                    HighlightHUD(_currentDirection);
-                    _centerCancelZone.Opacity = 0.0;
+                    if (_centerCancelZone.Opacity > 0.0)
+                    {
+                        _centerCancelZone.Opacity = 0.0;
+                    }
+                    SlideDirection newDir = ResolveDirection(dx, dy);
+                    if (newDir != _currentDirection)
+                    {
+                        _currentDirection = newDir;
+                        HighlightRadialSector(_currentDirection);
+                        UpdateBallVisuals();
+                    }
                 }
             }
         }
@@ -827,7 +1138,6 @@ namespace TouchAssistBall
 
             _mode = GestureMode.Idle;
             _currentDirection = SlideDirection.None;
-            ShowHUD(false);
             _centerCancelZone.Opacity = 0.0;
 
             _ballScale.ScaleX = 1.0;
@@ -843,6 +1153,7 @@ namespace TouchAssistBall
                 _lastTapReleaseTime = DateTime.MinValue;
 
                 ActionExecutor.ReleaseHold();
+                ShowRadialMenu(false);
                 TriggerFeedback("松开");
                 Opacity = _config.NormalOpacity;
                 UpdateBallVisuals();
@@ -865,7 +1176,7 @@ namespace TouchAssistBall
                 return;
             }
 
-            // Scenario C: Was in Swipe Mode -> Execute Swipe Action immediately (or cancel cleanly if in deadzone)
+            // Scenario C: Was in Sliding / Radial Menu Mode -> Execute Action (or cancel cleanly)
             if (endMode == GestureMode.Sliding)
             {
                 _isSecondTapCandidate = false;
@@ -874,13 +1185,17 @@ namespace TouchAssistBall
 
                 if (endDir != SlideDirection.None)
                 {
-                    AppLogger.Log("Swipe END: direction=" + endDir);
-                    ExecuteSwipeAction(endDir);
-                    TriggerFeedback(GetSwipeActionLabel(endDir));
+                    AppLogger.Log("Radial Menu Action Selected: direction=" + endDir);
+                    PulseAndCollapseRadialMenu(endDir, () =>
+                    {
+                        ExecuteSwipeAction(endDir);
+                        TriggerFeedback(GetSwipeActionLabel(endDir));
+                    });
                 }
                 else
                 {
-                    AppLogger.Log("Swipe CANCELLED: finger returned to center cancel deadzone");
+                    AppLogger.Log("Radial Menu Cancelled: finger lifted in center deadzone");
+                    ShowRadialMenu(false);
                     _lastInteractionTime = DateTime.UtcNow;
                     BeginAnimation(OpacityProperty, null);
                     Opacity = _config.NormalOpacity;
@@ -949,39 +1264,240 @@ namespace TouchAssistBall
             return SlideDirection.Left;
         }
 
+        private void ShowRadialMenu(bool show)
+        {
+            if (!_config.ShowDirectionHUD && show) return;
+
+            if (show)
+            {
+                if (_isRadialMenuOpen) return;
+                _isRadialMenuOpen = true;
+
+                if (_radialLabelsDirty)
+                {
+                    UpdateRadialMenuLabels();
+                    _radialLabelsDirty = false;
+                }
+
+                double ballSize = _config.BallSize;
+                double cx = HUD_EXT + ballSize / 2;
+                double cy = HUD_EXT + ballSize / 2;
+                _radialMenuScale.CenterX = cx;
+                _radialMenuScale.CenterY = cy;
+
+                _radialMenuCanvas.Visibility = Visibility.Visible;
+
+                DoubleAnimation scaleAnim = new DoubleAnimation
+                {
+                    From = 0.35,
+                    To = 1.0,
+                    Duration = TimeSpan.FromMilliseconds(160),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                };
+                Timeline.SetDesiredFrameRate(scaleAnim, 120);
+
+                DoubleAnimation opacityAnim = new DoubleAnimation
+                {
+                    From = 0.0,
+                    To = 1.0,
+                    Duration = TimeSpan.FromMilliseconds(140),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+                };
+                Timeline.SetDesiredFrameRate(opacityAnim, 120);
+
+                _radialMenuScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
+                _radialMenuScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnim);
+                _radialMenuCanvas.BeginAnimation(UIElement.OpacityProperty, opacityAnim);
+
+                // Ball slight contraction animation to accentuate radial opening:
+                DoubleAnimation ballContract = new DoubleAnimation(0.92, TimeSpan.FromMilliseconds(140))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+                };
+                Timeline.SetDesiredFrameRate(ballContract, 120);
+                _ballScale.BeginAnimation(ScaleTransform.ScaleXProperty, ballContract);
+                _ballScale.BeginAnimation(ScaleTransform.ScaleYProperty, ballContract);
+            }
+            else
+            {
+                if (!_isRadialMenuOpen && _radialMenuCanvas.Visibility != Visibility.Visible) return;
+                _isRadialMenuOpen = false;
+                _lastHighlightedDir = (SlideDirection)(-1);
+
+                DoubleAnimation scaleAnim = new DoubleAnimation
+                {
+                    To = 0.60,
+                    Duration = TimeSpan.FromMilliseconds(120),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+                };
+                Timeline.SetDesiredFrameRate(scaleAnim, 120);
+
+                DoubleAnimation opacityAnim = new DoubleAnimation
+                {
+                    To = 0.0,
+                    Duration = TimeSpan.FromMilliseconds(100),
+                    EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+                };
+                Timeline.SetDesiredFrameRate(opacityAnim, 120);
+
+                opacityAnim.Completed += (s, e) =>
+                {
+                    if (!_isRadialMenuOpen)
+                    {
+                        _radialMenuCanvas.Visibility = Visibility.Hidden;
+                    }
+                };
+
+                _radialMenuScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
+                _radialMenuScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnim);
+                _radialMenuCanvas.BeginAnimation(UIElement.OpacityProperty, opacityAnim);
+
+                // Ball restoration animation:
+                DoubleAnimation ballRestore = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(140))
+                {
+                    EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+                };
+                Timeline.SetDesiredFrameRate(ballRestore, 120);
+                _ballScale.BeginAnimation(ScaleTransform.ScaleXProperty, ballRestore);
+                _ballScale.BeginAnimation(ScaleTransform.ScaleYProperty, ballRestore);
+            }
+        }
+
+        private void HighlightRadialSector(SlideDirection dir)
+        {
+            if (dir == _lastHighlightedDir) return;
+            _lastHighlightedDir = dir;
+
+            foreach (var item in _radialSectors)
+            {
+                bool isTarget = (item.Direction == dir);
+                if (isTarget)
+                {
+                    item.SectorPath.Fill = _sectorBrushActive;
+                    item.SectorPath.Stroke = _sectorStrokeActive;
+                    item.SectorPath.StrokeThickness = 2.8;
+                    item.SectorPath.Effect = _sectorGlowActive;
+                    Canvas.SetZIndex(item.SectorPath, 10);
+                    Canvas.SetZIndex(item.LabelPill, 11);
+
+                    item.LabelPill.Background = _pillBgActive;
+                    item.LabelPill.BorderBrush = _pillBorderActive;
+                    item.TxtAction.Foreground = Brushes.White;
+                    item.TxtKey.Foreground = _pillTextKeyActive;
+                }
+                else
+                {
+                    item.SectorPath.Fill = _sectorBrushNormal;
+                    item.SectorPath.Stroke = _sectorStrokeNormal;
+                    item.SectorPath.StrokeThickness = 1.6;
+                    item.SectorPath.Effect = _sectorShadowNormal;
+                    Canvas.SetZIndex(item.SectorPath, 1);
+                    Canvas.SetZIndex(item.LabelPill, 2);
+
+                    item.LabelPill.Background = _pillBgNormal;
+                    item.LabelPill.BorderBrush = _pillBorderNormal;
+                    item.TxtAction.Foreground = _pillTextActionNormal;
+                    item.TxtKey.Foreground = _pillTextKeyNormal;
+                }
+            }
+        }
+
+        private void PulseAndCollapseRadialMenu(SlideDirection dir, Action onExecuted)
+        {
+            RadialSectorItem targetItem = null;
+            foreach (var item in _radialSectors)
+            {
+                if (item.Direction == dir) { targetItem = item; break; }
+            }
+
+            if (targetItem != null)
+            {
+                DoubleAnimation pulseAnim = new DoubleAnimation
+                {
+                    To = 1.05,
+                    Duration = TimeSpan.FromMilliseconds(70),
+                    AutoReverse = true
+                };
+                Timeline.SetDesiredFrameRate(pulseAnim, 120);
+                _radialMenuScale.BeginAnimation(ScaleTransform.ScaleXProperty, pulseAnim);
+                _radialMenuScale.BeginAnimation(ScaleTransform.ScaleYProperty, pulseAnim);
+            }
+
+            DispatcherTimer collapseTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
+            collapseTimer.Tick += (s, e) =>
+            {
+                collapseTimer.Stop();
+                ShowRadialMenu(false);
+                if (onExecuted != null)
+                {
+                    onExecuted();
+                }
+            };
+            collapseTimer.Start();
+        }
+
         private void ShowHUD(bool show)
         {
-            if (!_config.ShowDirectionHUD) return;
-            PositionDirectionBadges();
-
-            double targetOpacity = show ? 1.0 : 0.0;
-            _badgeUp.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(targetOpacity, TimeSpan.FromMilliseconds(120)));
-            _badgeDown.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(targetOpacity, TimeSpan.FromMilliseconds(120)));
-            _badgeLeft.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(targetOpacity, TimeSpan.FromMilliseconds(120)));
-            _badgeRight.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(targetOpacity, TimeSpan.FromMilliseconds(120)));
+            ShowRadialMenu(show);
         }
 
         private void HighlightHUD(SlideDirection dir)
         {
-            SetBadgeHighlight(_badgeUp, dir == SlideDirection.Up);
-            SetBadgeHighlight(_badgeDown, dir == SlideDirection.Down);
-            SetBadgeHighlight(_badgeLeft, dir == SlideDirection.Left);
-            SetBadgeHighlight(_badgeRight, dir == SlideDirection.Right);
+            HighlightRadialSector(dir);
         }
 
-        private void SetBadgeHighlight(Border badge, bool isHighlighted)
+        private bool IsScreenshotAction(ActionType action, string customKey)
         {
-            if (isHighlighted)
+            if (action == ActionType.Screenshot || action == ActionType.SnippetScreenshot) return true;
+            if (action == ActionType.CustomKey && !string.IsNullOrEmpty(customKey))
             {
-                badge.Background = new SolidColorBrush(Color.FromArgb(245, 37, 99, 235));
-                badge.BorderBrush = new SolidColorBrush(Color.FromArgb(255, 147, 197, 253));
-                badge.BorderThickness = new Thickness(2.5);
+                string lower = customKey.ToLowerInvariant();
+                if (lower.Contains("snapshot") || lower.Contains("printscreen") || lower.Contains("prtsc") ||
+                    (lower.Contains("win") && lower.Contains("shift") && lower.Contains("s")) ||
+                    (lower.Contains("ctrl") && lower.Contains("alt") && lower.Contains("a")))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void ExecuteSafeAction(ActionType action, string customKey, Action onFeedback = null)
+        {
+            if (IsScreenshotAction(action, customKey))
+            {
+                // Temporarily flash-hide window to guarantee 100% absence in captured frame
+                Visibility = Visibility.Hidden;
+                DispatcherTimer preTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(60) };
+                preTimer.Tick += (s, e) =>
+                {
+                    preTimer.Stop();
+                    try
+                    {
+                        ActionExecutor.Execute(action, customKey);
+                        if (onFeedback != null) onFeedback();
+                    }
+                    finally
+                    {
+                        DispatcherTimer postTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
+                        postTimer.Tick += (ps, pe) =>
+                        {
+                            postTimer.Stop();
+                            if (!_isUserHidden)
+                            {
+                                Visibility = Visibility.Visible;
+                                KeepWindowOnTop();
+                            }
+                        };
+                        postTimer.Start();
+                    }
+                };
+                preTimer.Start();
             }
             else
             {
-                badge.Background = new SolidColorBrush(Color.FromArgb(230, 15, 23, 42));
-                badge.BorderBrush = new SolidColorBrush(Color.FromArgb(180, 148, 163, 184));
-                badge.BorderThickness = new Thickness(1.8);
+                ActionExecutor.Execute(action, customKey);
+                if (onFeedback != null) onFeedback();
             }
         }
 
@@ -997,28 +1513,41 @@ namespace TouchAssistBall
             {
                 if (_config.ClickAction != ActionType.None)
                 {
-                    ActionExecutor.Execute(_config.ClickAction, _config.CustomClickKey);
-                    TriggerFeedback(ActionExecutor.GetActionShortLabel(_config.ClickAction, _config.CustomClickKey));
+                    ExecuteSafeAction(_config.ClickAction, _config.CustomClickKey, () =>
+                    {
+                        TriggerFeedback(ActionExecutor.GetActionShortLabel(_config.ClickAction, _config.CustomClickKey));
+                    });
                 }
             }
         }
 
         private void ExecuteSwipeAction(SlideDirection dir)
         {
+            ActionType action = ActionType.None;
+            string customKey = "";
             switch (dir)
             {
                 case SlideDirection.Up:
-                    ActionExecutor.Execute(_config.SwipeUpAction, _config.CustomSwipeUpKey);
+                    action = _config.SwipeUpAction;
+                    customKey = _config.CustomSwipeUpKey;
                     break;
                 case SlideDirection.Down:
-                    ActionExecutor.Execute(_config.SwipeDownAction, _config.CustomSwipeDownKey);
+                    action = _config.SwipeDownAction;
+                    customKey = _config.CustomSwipeDownKey;
                     break;
                 case SlideDirection.Left:
-                    ActionExecutor.Execute(_config.SwipeLeftAction, _config.CustomSwipeLeftKey);
+                    action = _config.SwipeLeftAction;
+                    customKey = _config.CustomSwipeLeftKey;
                     break;
                 case SlideDirection.Right:
-                    ActionExecutor.Execute(_config.SwipeRightAction, _config.CustomSwipeRightKey);
+                    action = _config.SwipeRightAction;
+                    customKey = _config.CustomSwipeRightKey;
                     break;
+            }
+
+            if (action != ActionType.None)
+            {
+                ExecuteSafeAction(action, customKey);
             }
         }
 
@@ -1041,6 +1570,62 @@ namespace TouchAssistBall
             Opacity = _config.ActiveOpacity;
             UpdateBallVisuals();
             _feedbackTimer.Start();
+        }
+
+        public void WakeUpAndShow()
+        {
+            _isUserHidden = false;
+            if (Visibility != Visibility.Visible)
+            {
+                Visibility = Visibility.Visible;
+            }
+            BeginAnimation(OpacityProperty, null);
+            Opacity = _config.NormalOpacity;
+            _lastInteractionTime = DateTime.UtcNow;
+            ClampAndSaveCurrentPosition();
+            KeepWindowOnTop();
+            UpdateBallVisuals();
+            TriggerFeedback("📍 已激活");
+        }
+
+        private bool _isExternalScreenshotHiding = false;
+        private void OnScreenshotDetectTimerTick(object sender, EventArgs e)
+        {
+            if (_isUserHidden || _isExternalScreenshotHiding) return;
+            if (Visibility != Visibility.Visible) return;
+
+            // 1. Detect PrintScreen physical key tap
+            bool prtSc = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_SNAPSHOT) & 0x8000) != 0;
+
+            // 2. Detect Win + Shift + S snippet shortcut
+            bool winDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LWIN) & 0x8000) != 0 ||
+                           (NativeMethods.GetAsyncKeyState(NativeMethods.VK_RWIN) & 0x8000) != 0;
+            bool shiftDown = (NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0;
+            bool sDown = (NativeMethods.GetAsyncKeyState((int)'S') & 0x8000) != 0;
+
+            if (prtSc || (winDown && shiftDown && sDown))
+            {
+                FlashHideForExternalScreenshot();
+            }
+        }
+
+        private void FlashHideForExternalScreenshot()
+        {
+            if (_isExternalScreenshotHiding) return;
+            _isExternalScreenshotHiding = true;
+            Visibility = Visibility.Hidden;
+            DispatcherTimer restoreTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+            restoreTimer.Tick += (s, e) =>
+            {
+                restoreTimer.Stop();
+                _isExternalScreenshotHiding = false;
+                if (!_isUserHidden)
+                {
+                    Visibility = Visibility.Visible;
+                    KeepWindowOnTop();
+                }
+            };
+            restoreTimer.Start();
         }
 
         #region Free Floating Multi-Monitor Position Management
@@ -1166,10 +1751,12 @@ namespace TouchAssistBall
                 _centerCancelZone.Height = cancelRadius * 2;
                 Canvas.SetLeft(_centerCancelZone, HUD_EXT + _config.BallSize / 2 - cancelRadius);
                 Canvas.SetTop(_centerCancelZone, HUD_EXT + _config.BallSize / 2 - cancelRadius);
+                Canvas.SetLeft(_ballGrid, HUD_EXT);
+                Canvas.SetTop(_ballGrid, HUD_EXT);
+                RebuildRadialMenu();
                 _lastInteractionTime = DateTime.UtcNow;
                 BeginAnimation(OpacityProperty, null);
                 Opacity = _config.NormalOpacity;
-                PositionDirectionBadges();
                 ClampAndSaveCurrentPosition();
                 UpdateBallVisuals();
             }

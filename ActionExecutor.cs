@@ -131,6 +131,51 @@ namespace TouchAssistBall
             }
         }
 
+        public static string GetActionKeyHint(ActionType action, string customKey = "")
+        {
+            if (!string.IsNullOrWhiteSpace(customKey))
+            {
+                return customKey.ToUpper();
+            }
+
+            switch (action)
+            {
+                case ActionType.None: return "";
+                case ActionType.Backspace: return "Backspace";
+                case ActionType.Copy: return "Ctrl+C";
+                case ActionType.Paste: return "Ctrl+V";
+                case ActionType.Screenshot: return "PrintScreen";
+                case ActionType.SnippetScreenshot: return "Win+Shift+S";
+                case ActionType.VoiceTyping: return "RAlt";
+                case ActionType.RightAlt: return "RAlt";
+                case ActionType.Enter: return "Enter";
+                case ActionType.Undo: return "Ctrl+Z";
+                case ActionType.Redo: return "Ctrl+Y";
+                case ActionType.SelectAll: return "Ctrl+A";
+                case ActionType.Cut: return "Ctrl+X";
+                case ActionType.Save: return "Ctrl+S";
+                case ActionType.AltTab: return "Alt+Tab";
+                case ActionType.ShowDesktop: return "Win+D";
+                case ActionType.ClipboardHistory: return "Win+V";
+                case ActionType.CloseWindow: return "Ctrl+W";
+                case ActionType.Refresh: return "F5";
+                case ActionType.Esc: return "Esc";
+                case ActionType.Delete: return "Del";
+                case ActionType.Space: return "Space";
+                case ActionType.Tab: return "Tab";
+                case ActionType.HoldCurrentKey: return "按住";
+                case ActionType.ContinuousBackspace: return "按住⌫";
+                case ActionType.ContinuousDelete: return "按住Del";
+                case ActionType.HoldCtrl: return "按住Ctrl";
+                case ActionType.HoldAlt: return "按住Alt";
+                case ActionType.HoldShift: return "按住Shift";
+                case ActionType.HoldWin: return "按住Win";
+                case ActionType.HoldSpace: return "按住空格";
+                case ActionType.CustomKey: return "自定义";
+                default: return "";
+            }
+        }
+
         public static void Execute(ActionType action, string customKey = "")
         {
             ThreadPool.QueueUserWorkItem(_ =>

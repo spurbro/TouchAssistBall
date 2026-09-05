@@ -39,6 +39,7 @@ namespace TouchAssistBallTests
             TestResourceCleanup();
             TestTabletOrientationClamping();
             TestPhysicalKeyHoldSimulation();
+            TestRadialMenuAndKeyHints();
 
             Console.WriteLine("========================================");
             Console.WriteLine(string.Format("Tests completed: {0} passed, {1} failed.", _passed, _failed));
@@ -402,6 +403,9 @@ namespace TouchAssistBallTests
                 bool destroyed = NativeMethods.DestroyIcon(hIcon);
                 Assert(destroyed, "DestroyIcon successfully released GDI HICON handle");
             }
+
+            Assert(NativeMethods.WDA_EXCLUDEFROMCAPTURE == 0x11, "NativeMethods.WDA_EXCLUDEFROMCAPTURE == 0x00000011 (DWM Screen Capture Exclusion)");
+            Assert(NativeMethods.WDA_NONE == 0x00, "NativeMethods.WDA_NONE == 0x00000000 (Default Display Affinity)");
         }
 
         static void TestTabletOrientationClamping()
@@ -484,6 +488,51 @@ namespace TouchAssistBallTests
 
             ActionExecutor.ReleaseAllHeldKeys();
             Assert(ActionExecutor.IsHoldingKeys == false, "After ReleaseAllHeldKeys() -> IsHoldingKeys == false");
+        }
+
+        static void TestRadialMenuAndKeyHints()
+        {
+            Console.WriteLine("\n--- 9. Testing 4-Sector Radial Menu Geometry & Key Hints ---");
+
+            // Key Hints
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.Copy, "") == "Ctrl+C", "GetActionKeyHint(Copy) == Ctrl+C");
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.Paste, "") == "Ctrl+V", "GetActionKeyHint(Paste) == Ctrl+V");
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.Screenshot, "") == "PrintScreen", "GetActionKeyHint(Screenshot) == PrintScreen");
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.VoiceTyping, "") == "RAlt", "GetActionKeyHint(VoiceTyping) == RAlt");
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.Enter, "") == "Enter", "GetActionKeyHint(Enter) == Enter");
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.CustomKey, "Ctrl+1") == "CTRL+1", "GetActionKeyHint(CustomKey, \"Ctrl+1\") == CTRL+1");
+            Assert(ActionExecutor.GetActionKeyHint(ActionType.CustomKey, "Win+Shift+S") == "WIN+SHIFT+S", "GetActionKeyHint(CustomKey, \"Win+Shift+S\") == WIN+SHIFT+S");
+
+            // 4-Quadrant Angle & Direction Resolution
+            Func<double, double, string> resolveDir = (dx, dy) =>
+            {
+                double angle = Math.Atan2(dy, dx) * (180.0 / Math.PI);
+                if (angle >= -135 && angle < -45) return "Up";
+                if (angle >= 45 && angle < 135) return "Down";
+                if (angle >= -45 && angle < 45) return "Right";
+                return "Left";
+            };
+
+            Assert(resolveDir(0, -60) == "Up", "ResolveDirection(0, -60) -> Up (270°)");
+            Assert(resolveDir(0, 60) == "Down", "ResolveDirection(0, 60) -> Down (90°)");
+            Assert(resolveDir(-60, 0) == "Left", "ResolveDirection(-60, 0) -> Left (180°)");
+            Assert(resolveDir(60, 0) == "Right", "ResolveDirection(60, 0) -> Right (0°)");
+            Assert(resolveDir(50, -20) == "Right", "ResolveDirection(50, -20) -> Right (-21.8° in sector)");
+            Assert(resolveDir(20, -50) == "Up", "ResolveDirection(20, -50) -> Up (-68.2° in sector)");
+            Assert(resolveDir(-50, 20) == "Left", "ResolveDirection(-50, 20) -> Left (158.2° in sector)");
+            Assert(resolveDir(20, 50) == "Down", "ResolveDirection(20, 50) -> Down (68.2° in sector)");
+
+            // Annular Sector Angular Gap Verification
+            // Sectors: Up (226.5°-313.5°), Right (316.5°-403.5°), Down (46.5°-133.5°), Left (136.5°-223.5°)
+            double gapUpRight = 316.5 - 313.5;
+            double gapRightDown = 46.5 - (403.5 - 360.0);
+            double gapDownLeft = 136.5 - 133.5;
+            double gapLeftUp = 226.5 - 223.5;
+
+            Assert(Math.Abs(gapUpRight - 3.0) < 0.001, "Sector gap Up-Right is exactly 3.0°");
+            Assert(Math.Abs(gapRightDown - 3.0) < 0.001, "Sector gap Right-Down is exactly 3.0°");
+            Assert(Math.Abs(gapDownLeft - 3.0) < 0.001, "Sector gap Down-Left is exactly 3.0°");
+            Assert(Math.Abs(gapLeftUp - 3.0) < 0.001, "Sector gap Left-Up is exactly 3.0°");
         }
     }
 

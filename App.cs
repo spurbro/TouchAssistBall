@@ -10,6 +10,8 @@ namespace TouchAssistBall
     public class App : Application
     {
         private static Mutex _appMutex;
+        private static EventWaitHandle _wakeUpEvent;
+        private static App _currentApp;
         private Forms.NotifyIcon _trayIcon;
         private FloatingBallWindow _ballWindow;
         private AppConfig _config;
@@ -25,14 +27,63 @@ namespace TouchAssistBall
                 _appMutex = new Mutex(true, "Local\\TouchAssistBall_Mutex_App", out isNewInstance);
                 if (!isNewInstance)
                 {
-                    AppLogger.Log("Another instance is already running. Exiting.");
+                    AppLogger.Log("Another instance is already running. Signaling wake-up to existing instance.");
+                    try
+                    {
+                        using (EventWaitHandle wake = EventWaitHandle.OpenExisting("Local\\TouchAssistBall_WakeUp_Event"))
+                        {
+                            wake.Set();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AppLogger.Log("Failed to signal wake-up event: " + ex.Message);
+                    }
                     return;
                 }
 
+                // Create the named wake-up event for subsequent launches
+                bool createdNew;
+                _wakeUpEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\TouchAssistBall_WakeUp_Event", out createdNew);
+
                 AppLogger.Log("Creating App instance...");
-                App app = new App();
+                _currentApp = new App();
+
+                // Start background thread to listen for wake-up signals from secondary runs
+                Thread wakeThread = new Thread(() =>
+                {
+                    while (true)
+                    {
+                        try
+                        {
+                            if (_wakeUpEvent.WaitOne())
+                            {
+                                AppLogger.Log("Wake-up signal received from secondary launch!");
+                                if (_currentApp != null && _currentApp.Dispatcher != null)
+                                {
+                                    _currentApp.Dispatcher.BeginInvoke(new Action(() =>
+                                    {
+                                        _currentApp.OnWakeUpRequested();
+                                    }));
+                                }
+                            }
+                        }
+                        catch (ThreadAbortException)
+                        {
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            AppLogger.Log("Error in wakeThread: " + ex.Message);
+                            Thread.Sleep(500);
+                        }
+                    }
+                });
+                wakeThread.IsBackground = true;
+                wakeThread.Start();
+
                 AppLogger.Log("Calling app.Run()...");
-                app.Run();
+                _currentApp.Run();
                 AppLogger.Log("app.Run() finished.");
             }
             catch (Exception ex)
@@ -46,7 +97,37 @@ namespace TouchAssistBall
                     try { _appMutex.ReleaseMutex(); } catch { }
                     _appMutex.Dispose();
                 }
+                if (_wakeUpEvent != null)
+                {
+                    _wakeUpEvent.Dispose();
+                }
                 AppLogger.Log("=== App Main Exited ===");
+            }
+        }
+
+        private void OnWakeUpRequested()
+        {
+            try
+            {
+                if (_ballWindow == null)
+                {
+                    AppLogger.Log("Recreating FloatingBallWindow on wake-up...");
+                    _ballWindow = new FloatingBallWindow(_config);
+                    _ballWindow.Show();
+                }
+                else
+                {
+                    _ballWindow.WakeUpAndShow();
+                }
+
+                if (_trayIcon != null)
+                {
+                    _trayIcon.ShowBalloonTip(1500, "触屏悬浮球", "悬浮球已激活并恢复至屏幕最顶层！", Forms.ToolTipIcon.Info);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Log("Error in OnWakeUpRequested: " + ex.ToString());
             }
         }
 

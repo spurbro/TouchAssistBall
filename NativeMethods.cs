@@ -194,5 +194,16 @@ namespace TouchAssistBall
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool DestroyIcon(IntPtr hIcon);
+
+        // Window Display Affinity (Exclude from screen captures and screen recording in Windows 10/11)
+        public const uint WDA_NONE = 0x00000000;
+        public const uint WDA_MONITOR = 0x00000001;
+        public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int vKey);
     }
 }
